@@ -1,0 +1,21 @@
+services:
+  todo:
+    build: .
+    container_name: todo-island
+    ports:
+      # 仅绑本机，供本机 nginx（HTTPS）反代；勿直接对公网暴露
+      - "127.0.0.1:${HOST_PORT:-8080}:3000"
+    env_file:
+      - .env
+    environment:
+      DATA_DIR: /app/data
+      NODE_ENV: production
+      # 容器内监听端口固定，避免被 .env 的宿主机端口覆盖
+      PORT: "3000"
+      # 定点事件按此时区解释（可用 .env 的 APP_TIMEZONE / TZ 覆盖）
+      TZ: ${TZ:-Asia/Shanghai}
+      APP_TIMEZONE: ${APP_TIMEZONE:-${TZ:-Asia/Shanghai}}
+    volumes:
+      # 直接挂载项目下的 data/，本地可见 todos.json / 队列文件
+      - ./data:/app/data
+    restart: unless-stopped
