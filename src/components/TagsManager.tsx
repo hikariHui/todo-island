@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Background,
   Button,
@@ -26,25 +26,29 @@ export function TagsManager() {
   const [savingRename, setSavingRename] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/tags");
-      if (res.status === 401) {
-        router.replace("/login");
-        return;
-      }
-      const data = (await res.json()) as { tags: string[] };
-      setTags(data.tags);
-    } catch {
-      toast.error({ message: "加载标签失败" });
-    } finally {
-      setLoading(false);
-    }
-  }, [router]);
-
   useEffect(() => {
-    void load();
-  }, [load]);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/tags");
+        if (cancelled) return;
+        if (res.status === 401) {
+          router.replace("/login");
+          return;
+        }
+        const data = (await res.json()) as { tags: string[] };
+        if (cancelled) return;
+        setTags(data.tags);
+      } catch {
+        if (!cancelled) toast.error({ message: "加载标签失败" });
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   const sorted = useMemo(
     () => [...tags].sort((a, b) => a.localeCompare(b, "zh-CN")),

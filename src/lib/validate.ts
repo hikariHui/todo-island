@@ -1,4 +1,9 @@
-import { isAllDayDue, isTimedDue } from "./due";
+import {
+  isAllDayDue,
+  isMonthDue,
+  isTimedDue,
+  isYearDue,
+} from "./due";
 
 export const MAX_TITLE_LENGTH = 500;
 
@@ -38,11 +43,17 @@ export function normalizeDueAt(
   if (typeof input !== "string") {
     return { ok: false, error: "日期格式无效" };
   }
-  if (isAllDayDue(input) || isTimedDue(input)) {
+  if (
+    isYearDue(input) ||
+    isMonthDue(input) ||
+    isAllDayDue(input) ||
+    isTimedDue(input)
+  ) {
     return { ok: true, dueAt: input };
   }
   return {
     ok: false,
-    error: "日期格式无效（需 YYYY-MM-DD 或 YYYY-MM-DDTHH:mm[:ss]）",
+    error:
+      "日期格式无效（需 YYYY、YYYY-MM、YYYY-MM-DD 或 YYYY-MM-DDTHH:mm[:ss]）",
   };
 }

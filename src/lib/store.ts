@@ -1,7 +1,12 @@
 import { promises as fs } from "fs";
 import path from "path";
-import { dueSortKey } from "./due";
+import { compareTodoOrder, findTodoInsertIndex } from "./due";
 import { collectAllTags, normalizeTagName, normalizeTags } from "./tags";
+import {
+  CURRENT_STORE_SCHEMA_VERSION,
+  migrateStoreFile,
+  type RawStoreFile,
+} from "./store-migrate";
 import type { CreateTodoInput, Todo, TodoStore, UpdateTodoInput } from "./types";
 
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
@@ -14,7 +19,11 @@ async function ensureStore(): Promise<void> {
   try {
     await fs.access(DATA_FILE);
   } catch {
-    const initial: TodoStore = { tags: [], todos: [] };
+    const initial: TodoStore = {
+      schemaVersion: CURRENT_STORE_SCHEMA_VERSION,
+      tags: [],
+      todos: [],
+    };
     await fs.writeFile(DATA_FILE, JSON.stringify(initial, null, 2), "utf8");
   }
 }
@@ -56,10 +65,13 @@ function mergeTagCatalog(existing: string[], extra: string[]): string[] {
   return normalizeTags([...existing, ...extra]);
 }
 
-async function readStore(): Promise<TodoStore> {
+async function loadStoreFromDisk(): Promise<{
+  store: TodoStore;
+  migrated: boolean;
+}> {
   await ensureStore();
   const raw = await fs.readFile(DATA_FILE, "utf8");
-  const parsed = JSON.parse(raw) as { tags?: unknown; todos?: unknown[] };
+  const parsed = JSON.parse(raw) as RawStoreFile;
   const todos = Array.isArray(parsed.todos)
     ? parsed.todos.map((item) =>
         migrateTodo((item ?? {}) as Record<string, unknown>),
@@ -67,15 +79,28 @@ async function readStore(): Promise<TodoStore> {
     : [];
   const fromFile = normalizeTags(parsed.tags);
   const fromTodos = collectAllTags(todos);
-  return {
-    tags: mergeTagCatalog(fromFile, fromTodos),
-    todos,
-  };
+  const tags = mergeTagCatalog(fromFile, fromTodos);
+  const { store, migrated } = migrateStoreFile(parsed, todos, tags);
+  return { store, migrated };
+}
+
+/** 在已持有 store 写锁时读取；迁移回写与业务写同一队列，避免丢更新。 */
+async function readStoreInLock(): Promise<TodoStore> {
+  const { store, migrated } = await loadStoreFromDisk();
+  if (migrated) {
+    await writeStore(store);
+  }
+  return store;
+}
+
+async function readStore(): Promise<TodoStore> {
+  return withLock(readStoreInLock);
 }
 
 async function writeStore(store: TodoStore): Promise<void> {
   await ensureStore();
   const payload: TodoStore = {
+    schemaVersion: store.schemaVersion ?? CURRENT_STORE_SCHEMA_VERSION,
     tags: normalizeTags(store.tags),
     todos: store.todos.map((todo) => ({
       ...todo,
@@ -96,14 +121,13 @@ function withLock<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
-function sortTodos(todos: Todo[]): Todo[] {
-  return [...todos].sort((a, b) => {
-    if (a.completed !== b.completed) return a.completed ? 1 : -1;
-    const aDue = dueSortKey(a.dueAt);
-    const bDue = dueSortKey(b.dueAt);
-    if (aDue !== bDue) return aDue - bDue;
-    return Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
-  });
+function insertTodoSorted(todos: Todo[], todo: Todo): void {
+  const index = findTodoInsertIndex(todos, todo);
+  todos.splice(index, 0, todo);
+}
+
+function orderAffectsTodo(before: Todo, after: Todo): boolean {
+  return compareTodoOrder(before, after) !== 0;
 }
 
 function sortTagCatalog(tags: string[]): string[] {
@@ -112,7 +136,7 @@ function sortTagCatalog(tags: string[]): string[] {
 
 export async function listTodos(): Promise<Todo[]> {
   const store = await readStore();
-  return sortTodos(store.todos);
+  return store.todos;
 }
 
 export async function listTags(): Promise<string[]> {
@@ -127,7 +151,7 @@ export async function listTodosAndTags(): Promise<{
 }> {
   const store = await readStore();
   return {
-    todos: sortTodos(store.todos),
+    todos: store.todos,
     tags: sortTagCatalog(store.tags),
   };
 }
@@ -139,7 +163,7 @@ export async function getTodo(id: string): Promise<Todo | null> {
 
 export async function createTodo(input: CreateTodoInput): Promise<Todo> {
   return withLock(async () => {
-    const store = await readStore();
+    const store = await readStoreInLock();
     const now = new Date().toISOString();
     const tags = normalizeTags(input.tags);
     const todo: Todo = {
@@ -157,7 +181,7 @@ export async function createTodo(input: CreateTodoInput): Promise<Todo> {
       createdAt: now,
       updatedAt: now,
     };
-    store.todos.push(todo);
+    insertTodoSorted(store.todos, todo);
     store.tags = mergeTagCatalog(store.tags, tags);
     await writeStore(store);
     return todo;
@@ -169,7 +193,7 @@ export async function updateTodo(
   input: UpdateTodoInput,
 ): Promise<Todo | null> {
   return withLock(async () => {
-    const store = await readStore();
+    const store = await readStoreInLock();
     const index = store.todos.findIndex((t) => t.id === id);
     if (index < 0) return null;
 
@@ -204,7 +228,12 @@ export async function updateTodo(
       dueAt: input.dueAt !== undefined ? input.dueAt : current.dueAt,
       updatedAt: now,
     };
-    store.todos[index] = next;
+    if (orderAffectsTodo(current, next)) {
+      store.todos.splice(index, 1);
+      insertTodoSorted(store.todos, next);
+    } else {
+      store.todos[index] = next;
+    }
     if (input.tags !== undefined) {
       store.tags = mergeTagCatalog(store.tags, tags);
     }
@@ -216,9 +245,10 @@ export async function updateTodo(
 /** Update existing todo only — never resurrect a deleted id. */
 export async function saveTodo(todo: Todo): Promise<Todo | null> {
   return withLock(async () => {
-    const store = await readStore();
+    const store = await readStoreInLock();
     const index = store.todos.findIndex((t) => t.id === todo.id);
     if (index < 0) return null;
+    const current = store.todos[index];
     const normalized: Todo = {
       ...todo,
       tags: normalizeTags(todo.tags),
@@ -228,7 +258,12 @@ export async function saveTodo(todo: Todo): Promise<Todo | null> {
       calendarSequence: Math.max(0, Math.floor(todo.calendarSequence || 0)),
       calendarSyncPending: Boolean(todo.calendarSyncPending),
     };
-    store.todos[index] = normalized;
+    if (orderAffectsTodo(current, normalized)) {
+      store.todos.splice(index, 1);
+      insertTodoSorted(store.todos, normalized);
+    } else {
+      store.todos[index] = normalized;
+    }
     store.tags = mergeTagCatalog(store.tags, normalized.tags);
     await writeStore(store);
     return normalized;
@@ -246,7 +281,7 @@ export async function updateTodoSyncMeta(
   },
 ): Promise<Todo | null> {
   return withLock(async () => {
-    const store = await readStore();
+    const store = await readStoreInLock();
     const index = store.todos.findIndex((t) => t.id === id);
     if (index < 0) return null;
     const current = store.todos[index];
@@ -280,7 +315,7 @@ export async function updateTodoSyncMeta(
 
 export async function deleteTodo(id: string): Promise<Todo | null> {
   return withLock(async () => {
-    const store = await readStore();
+    const store = await readStoreInLock();
     const index = store.todos.findIndex((t) => t.id === id);
     if (index < 0) return null;
     const [removed] = store.todos.splice(index, 1);
@@ -297,7 +332,7 @@ export async function purgeCompletedBefore(
   cutoffIso: string,
 ): Promise<Todo[]> {
   return withLock(async () => {
-    const store = await readStore();
+    const store = await readStoreInLock();
     const cutoff = Date.parse(cutoffIso);
     if (Number.isNaN(cutoff)) return [];
 
@@ -327,7 +362,7 @@ export async function createTag(name: string): Promise<string> {
   return withLock(async () => {
     const tag = normalizeTagName(name);
     if (!tag) throw new Error("标签名不能为空");
-    const store = await readStore();
+    const store = await readStoreInLock();
     const exists = store.tags.some(
       (item) => item.toLowerCase() === tag.toLowerCase(),
     );
@@ -347,7 +382,7 @@ export async function renameTag(
     const newName = normalizeTagName(to);
     if (!oldName || !newName) throw new Error("标签名不能为空");
 
-    const store = await readStore();
+    const store = await readStoreInLock();
     const oldIndex = store.tags.findIndex(
       (item) => item.toLowerCase() === oldName.toLowerCase(),
     );
@@ -380,7 +415,7 @@ export async function deleteTag(name: string): Promise<string> {
   return withLock(async () => {
     const target = normalizeTagName(name);
     if (!target) throw new Error("标签名不能为空");
-    const store = await readStore();
+    const store = await readStoreInLock();
     const existing = store.tags.find(
       (item) => item.toLowerCase() === target.toLowerCase(),
     );

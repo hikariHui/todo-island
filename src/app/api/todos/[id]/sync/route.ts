@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { icloudConfigured } from "@/lib/icloud";
 import { enqueueIcloudUpsert, startIcloudQueueWorker } from "@/lib/icloud-queue";
+import { isCalendarSyncable } from "@/lib/due";
 import { getTodo } from "@/lib/store";
 
 startIcloudQueueWorker();
@@ -24,7 +25,7 @@ export async function POST(_request: Request, context: Ctx) {
   }
 
   const canSync =
-    Boolean(todo.dueAt) ||
+    isCalendarSyncable(todo.dueAt) ||
     Boolean(todo.calendarUid) ||
     Boolean(todo.calendarObjectUrl);
   if (!canSync) {

@@ -4,6 +4,7 @@ import { createTodo, getTodo, listTodosAndTags } from "@/lib/store";
 import { icloudStatus } from "@/lib/icloud";
 import { enqueueIcloudUpsert, startIcloudQueueWorker } from "@/lib/icloud-queue";
 import { normalizeTags } from "@/lib/tags";
+import { isCalendarSyncable } from "@/lib/due";
 import { normalizeDueAt, normalizeTitle } from "@/lib/validate";
 
 startIcloudQueueWorker();
@@ -43,7 +44,11 @@ export async function POST(request: Request) {
     dueAt: dueResult.dueAt ?? null,
   });
 
-  if (todo.dueAt) {
+  if (
+    isCalendarSyncable(todo.dueAt) ||
+    todo.calendarUid ||
+    todo.calendarObjectUrl
+  ) {
     await enqueueIcloudUpsert(todo.id);
   }
 

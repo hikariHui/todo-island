@@ -52,6 +52,8 @@ type QueueState = {
 
 let writeChain: Promise<unknown> = Promise.resolve();
 let pumping = false;
+/** 泵运行期间又有入队时置位，避免退出后任务卡住 */
+let pumpWakeRequested = false;
 
 function withLock<T>(fn: () => Promise<T>): Promise<T> {
   const run = writeChain.then(fn, fn);
@@ -156,7 +158,7 @@ export async function enqueueIcloudUpsert(todoId: string): Promise<void> {
     await writeQueue(state);
   });
 
-  void pumpIcloudQueue();
+  wakeIcloudQueue();
 }
 
 /**
@@ -185,6 +187,14 @@ export async function enqueueIcloudDelete(
     await writeQueue(state);
   });
 
+  wakeIcloudQueue();
+}
+
+function wakeIcloudQueue(): void {
+  if (pumping) {
+    pumpWakeRequested = true;
+    return;
+  }
   void pumpIcloudQueue();
 }
 
@@ -295,56 +305,84 @@ async function processJob(job: QueueJob): Promise<void> {
 }
 
 export async function pumpIcloudQueue(): Promise<void> {
-  if (pumping) return;
+  if (pumping) {
+    pumpWakeRequested = true;
+    return;
+  }
   pumping = true;
   try {
-    for (;;) {
-      const job = await claimNextJob();
-      if (!job) {
-        const state = await readQueue();
-        const waiting = state.jobs.filter(
-          (item) => !item.leasedAt || isLeaseExpired(item, Date.now()),
-        );
-        if (waiting.length === 0 && state.jobs.length === 0) break;
-        if (waiting.length === 0) {
-          // All jobs leased by a stuck worker — wait for lease expiry
-          await sleep(Math.min(LEASE_MS, 5000));
+    do {
+      pumpWakeRequested = false;
+      for (;;) {
+        const job = await claimNextJob();
+        if (!job) {
+          const state = await readQueue();
+          const now = Date.now();
+          const waiting = state.jobs.filter(
+            (item) => !item.leasedAt || isLeaseExpired(item, now),
+          );
+          if (waiting.length === 0 && state.jobs.length === 0) break;
+          if (waiting.length === 0) {
+            // All jobs leased by a stuck worker — wait for lease expiry
+            await sleep(Math.min(LEASE_MS, 5000));
+            continue;
+          }
+          const nextAt = Math.min(
+            ...waiting.map((item) => Date.parse(item.availableAt)),
+          );
+          const wait = Math.max(50, nextAt - Date.now());
+          await sleep(Math.min(wait, 5000));
           continue;
         }
-        const nextAt = Math.min(
-          ...waiting.map((item) => Date.parse(item.availableAt)),
-        );
-        const wait = Math.max(50, nextAt - Date.now());
-        await sleep(Math.min(wait, 5000));
-        continue;
-      }
 
-      try {
-        await processJob(job);
-        await completeJob(job.id);
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : "iCloud 同步失败";
-        console.error("[icloud-queue]", job.kind, job.todoId, message);
+        try {
+          await processJob(job);
+          await completeJob(job.id);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "iCloud 同步失败";
+          console.error("[icloud-queue]", job.kind, job.todoId, message);
 
-        if (job.kind === "upsert") {
-          await updateTodoSyncMeta(job.todoId, {
-            calendarSyncPending: false,
-            calendarSyncError: message,
-          }).catch(() => undefined);
+          if (job.kind === "upsert") {
+            await updateTodoSyncMeta(job.todoId, {
+              calendarSyncPending: false,
+              calendarSyncError: message,
+            }).catch(() => undefined);
+          }
+
+          await failJob(job, message);
         }
-
-        await failJob(job, message);
       }
-    }
+    } while (pumpWakeRequested);
   } finally {
     pumping = false;
+  }
+
+  // 退出瞬间又有入队：再拉起一轮，避免任务永久挂起
+  if (pumpWakeRequested) {
+    pumpWakeRequested = false;
+    void pumpIcloudQueue();
+    return;
+  }
+  const leftover = await readQueue();
+  if (leftover.jobs.length > 0) {
+    void pumpIcloudQueue();
   }
 }
 
 /** Resume unfinished / leased jobs after process start */
 export function startIcloudQueueWorker(): void {
-  void pumpIcloudQueue();
+  void withLock(async () => {
+    const state = await readQueue();
+    let changed = false;
+    for (const job of state.jobs) {
+      if (job.leasedAt) {
+        job.leasedAt = null;
+        changed = true;
+      }
+    }
+    if (changed) await writeQueue(state);
+  }).then(() => pumpIcloudQueue());
 }
 
 /**

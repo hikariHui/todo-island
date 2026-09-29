@@ -6,6 +6,7 @@ import {
   splitDueAt,
 } from "./due";
 import { zonedLocalToUtc } from "./timezone";
+import { isCalendarSyncable } from "./due";
 import type { Todo } from "./types";
 
 type CalDavClient = Awaited<ReturnType<typeof createDAVClient>>;
@@ -131,6 +132,12 @@ function buildIcal(todo: Todo, uid: string, sequence: number): string {
     `X-TODO-ISLAND-ID:${todo.id}`,
     `URL:todo-island://todo/${todo.id}`,
     `STATUS:${todo.completed ? "COMPLETED" : "CONFIRMED"}`,
+    "BEGIN:VALARM",
+    "ACTION:DISPLAY",
+    `DESCRIPTION:${summary}`,
+    // 提前 1 天：全天事件多为前一天默认提醒时间；定点事件为开始前 24 小时
+    "TRIGGER:-P1D",
+    "END:VALARM",
     "END:VEVENT",
     "END:VCALENDAR",
   ].join("\r\n");
@@ -254,7 +261,7 @@ export async function syncTodoToIcloud(todo: Todo): Promise<SyncResult> {
   try {
     const client = await getClient();
 
-    if (!todo.dueAt) {
+    if (!isCalendarSyncable(todo.dueAt)) {
       if (todo.calendarObjectUrl || todo.calendarUid) {
         const calendar = await resolveCalendar(client);
         const url =

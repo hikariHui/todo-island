@@ -7,6 +7,7 @@ import {
   startIcloudQueueWorker,
 } from "@/lib/icloud-queue";
 import { normalizeTags } from "@/lib/tags";
+import { isCalendarSyncable } from "@/lib/due";
 import { normalizeDueAt, normalizeTitle } from "@/lib/validate";
 
 startIcloudQueueWorker();
@@ -73,7 +74,8 @@ export async function PATCH(request: Request, context: Ctx) {
   }
 
   const shouldSync =
-    Boolean(todo.dueAt) ||
+    isCalendarSyncable(todo.dueAt) ||
+    isCalendarSyncable(before?.dueAt) ||
     Boolean(todo.calendarObjectUrl) ||
     Boolean(todo.calendarUid) ||
     Boolean(before?.calendarObjectUrl) ||
