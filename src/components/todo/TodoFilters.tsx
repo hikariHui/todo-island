@@ -48,10 +48,10 @@ export function TodoFilters({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2 sm:hidden">
+      <div className="sm:hidden">
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-full border-2 border-[#e8dcc8] bg-[#fffbe7] px-4 py-2.5 text-left transition hover:border-[#d4c4a8]"
+          className="flex w-full min-w-0 items-center justify-between gap-2 rounded-full border-2 border-[#e8dcc8] bg-[#fffbe7] px-4 py-2.5 text-left transition hover:border-[#d4c4a8]"
           aria-expanded={panelOpen}
           onClick={() => setPanelOpen((open) => !open)}
         >
@@ -95,9 +95,6 @@ export function TodoFilters({
             {panelOpen ? "收起" : "展开"}
           </span>
         </button>
-        <span className="shrink-0 text-xs text-[#7a6552]">
-          {visibleCount} 项
-        </span>
       </div>
 
       <div
@@ -194,6 +191,8 @@ export function TodoFilters({
           </div>
         ) : null}
       </div>
+
+      <p className="text-xs text-[#7a6552] sm:hidden">{visibleCount} 项</p>
     </div>
   );
 }
