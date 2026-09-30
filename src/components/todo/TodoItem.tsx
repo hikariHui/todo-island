@@ -9,7 +9,7 @@ import {
   scheduleStateLabel,
 } from "@/lib/due";
 import type { Todo } from "@/lib/types";
-import { formatCompletedLabel } from "./format";
+import { formatCompletedLabel, formatUpdatedAtLabel } from "./format";
 
 type TodoItemProps = {
   todo: Todo;
@@ -82,6 +82,11 @@ export function TodoItem({
             {todo.completed && todo.completedAt ? (
               <Tag size="small" color="app-green" variant="outlined">
                 {formatCompletedLabel(todo.completedAt)}
+              </Tag>
+            ) : null}
+            {formatUpdatedAtLabel(todo.updatedAt) ? (
+              <Tag size="small" color="default" variant="outlined">
+                {formatUpdatedAtLabel(todo.updatedAt)}
               </Tag>
             ) : null}
             {todo.tags.map((tag) => (
