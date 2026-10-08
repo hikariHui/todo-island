@@ -1,9 +1,19 @@
 # syntax=docker/dockerfile:1
 
-FROM node:22-bookworm-slim AS base
+# Node 版本一次声明，base/runner 两处引用，避免漂移
+ARG NODE_VERSION=22.23.3
+
+FROM node:${NODE_VERSION}-bookworm-slim AS base
+# pnpm 原生二进制与 corepack 下载统一走镜像源：构建环境常无法直连 registry.npmjs.org
+ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
-RUN corepack enable && corepack prepare pnpm@12.7.0 --activate
+# 预热：pnpm >=11 的包只是 JS 包装器，原生二进制（@pnpm/exe.*）在首次运行时才下载，
+# 且只落在当前 stage 的文件系统里。这里提前跑一次把二进制烧进 base 层，
+# deps/builder 均从 base 继承，后续任何 pnpm 调用都不再访问网络。
+RUN corepack enable \
+  && corepack prepare pnpm@12.7.0 --activate \
+  && pnpm --version
 WORKDIR /app
 
 FROM base AS deps
@@ -16,7 +26,7 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm build
 
-FROM node:22-bookworm-slim AS runner
+FROM node:${NODE_VERSION}-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

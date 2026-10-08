@@ -2,6 +2,8 @@ node_modules
 .next
 out
 data
+.pnpm-store
+.git
 .env*
 !.env.example
 *.log
