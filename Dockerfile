@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Node 版本一次声明，base/runner 两处引用，避免漂移
-ARG NODE_VERSION=22.23.3
+ARG NODE_VERSION=24.22.2
 
 FROM node:${NODE_VERSION}-bookworm-slim AS base
 # pnpm 原生二进制与 corepack 下载统一走镜像源：构建环境常无法直连 registry.npmjs.org
@@ -12,7 +12,7 @@ ENV PATH=$PNPM_HOME:$PATH
 # 且只落在当前 stage 的文件系统里。这里提前跑一次把二进制烧进 base 层，
 # deps/builder 均从 base 继承，后续任何 pnpm 调用都不再访问网络。
 RUN corepack enable \
-  && corepack prepare pnpm@12.7.0 --activate \
+  && corepack prepare pnpm@12.16.1 --activate \
   && pnpm --version
 WORKDIR /app
 

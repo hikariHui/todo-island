@@ -5,7 +5,7 @@
 ## 技术栈
 
 - Next.js 16（App Router）
-- Node.js 22 + pnpm 12
+- Node.js 24 + pnpm 12
 - [Animal-Island-UI](https://github.com/guokaigdg/animal-island-ui)
 - 本地 JSON 文件存储（无需数据库）
 - 环境变量密码登录
@@ -17,15 +17,15 @@
 
 ### 1. 环境要求
 
-- Node.js 22.x
-- pnpm 12.x（`packageManager` 已锁定为 `pnpm@12.7.0`）
+- Node.js 24.x
+- pnpm 12.x（`packageManager` 已锁定为 `pnpm@12.16.1`）
 
 安装 pnpm 12（npm 的 `latest` 仍是 11 线）：
 
 ```bash
 pnpm self-update latest-12
 # 或
-curl -fsSL https://get.pnpm.io/install.sh | env PNPM_VERSION=12.7.0 sh -
+curl -fsSL https://get.pnpm.io/install.sh | env PNPM_VERSION=12.16.1 sh -
 ```
 
 ### 2. 配置
