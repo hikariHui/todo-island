@@ -54,6 +54,6 @@ export function normalizeDueAt(
   return {
     ok: false,
     error:
-      "日期格式无效（需 YYYY、YYYY-MM、YYYY-MM-DD 或 YYYY-MM-DDTHH:mm[:ss]）",
+      "日期格式无效（需 YYYY、YYYY-MM、YYYY-MM-DD 或 YYYY-MM-DDTHH:mm[:ss][/分钟]）",
   };
 }

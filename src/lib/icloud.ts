@@ -1,19 +1,19 @@
 import { createDAVClient, type DAVCalendar } from "tsdav";
 import {
+  DEFAULT_DURATION_MINUTES,
   formatIcalDateOnly,
   isAllDayDue,
+  isCalendarSyncable,
   nextDateOnly,
   splitDueAt,
 } from "./due";
 import { zonedLocalToUtc } from "./timezone";
-import { isCalendarSyncable } from "./due";
 import type { Todo } from "./types";
 
 type CalDavClient = Awaited<ReturnType<typeof createDAVClient>>;
 
 const APP_NAME = "Todo Island";
 const PRODID = "-//Todo Island//todo-list//ZH";
-const DEFAULT_DURATION_MS = 60 * 60 * 1000; // 1 hour
 const MANAGED_FOOTER = [
   "——",
   `由 ${APP_NAME} 管理`,
@@ -100,7 +100,7 @@ function buildIcal(todo: Todo, uid: string, sequence: number): string {
     dtStart = `DTSTART;VALUE=DATE:${start}`;
     dtEnd = `DTEND;VALUE=DATE:${end}`;
   } else {
-    const { date, time } = splitDueAt(todo.dueAt);
+    const { date, time, durationMinutes } = splitDueAt(todo.dueAt);
     if (!date || !time) {
       throw new Error(`无效的 dueAt: ${todo.dueAt}`);
     }
@@ -108,7 +108,10 @@ function buildIcal(todo: Todo, uid: string, sequence: number): string {
     if (Number.isNaN(start.getTime())) {
       throw new Error(`无效的 dueAt: ${todo.dueAt}`);
     }
-    const end = new Date(start.getTime() + DEFAULT_DURATION_MS);
+    const end = new Date(
+      start.getTime() +
+        (durationMinutes ?? DEFAULT_DURATION_MINUTES) * 60 * 1000,
+    );
     dtStart = `DTSTART:${formatIcalUtc(start)}`;
     dtEnd = `DTEND:${formatIcalUtc(end)}`;
   }

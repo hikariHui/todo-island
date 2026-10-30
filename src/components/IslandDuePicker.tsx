@@ -3,7 +3,13 @@
 import { useMemo, useState } from "react";
 import { Button } from "animal-island-ui";
 import type { DueDraft } from "@/lib/due";
-import { emptyDueDraft } from "@/lib/due";
+import {
+  DEFAULT_DURATION_MINUTES,
+  DURATION_DAY_PRESETS_MINUTES,
+  DURATION_PRESETS_MINUTES,
+  emptyDueDraft,
+  formatDurationLabel,
+} from "@/lib/due";
 
 export type { DueDraft };
 
@@ -35,7 +41,9 @@ function formatSummary(draft: DueDraft): string {
     const d = parseDateKey(draft.date);
     if (!d) return "选择具体日期";
     const base = `${d.getMonth() + 1}月${d.getDate()}日`;
-    if (draft.timed && draft.time) return `${base} ${draft.time.slice(0, 5)}`;
+    if (draft.timed && draft.time) {
+      return `${base} ${draft.time.slice(0, 5)} · ${formatDurationLabel(draft.durationMinutes)}`;
+    }
     return `${base} · 全天`;
   }
   return "设置时间";
@@ -166,6 +174,24 @@ export function IslandDuePicker({
   const hour = value.time ? Number(value.time.slice(0, 2)) : 9;
   const minute = value.time ? Number(value.time.slice(3, 5)) : 0;
   const [timeOpen, setTimeOpen] = useState(false);
+  const knownDurations = new Set<number>([
+    ...DURATION_PRESETS_MINUTES,
+    ...DURATION_DAY_PRESETS_MINUTES,
+  ]);
+  const hourOptions = knownDurations.has(value.durationMinutes)
+    ? DURATION_PRESETS_MINUTES
+    : value.durationMinutes < DURATION_DAY_PRESETS_MINUTES[0]
+      ? [...DURATION_PRESETS_MINUTES, value.durationMinutes].sort(
+          (a, b) => a - b,
+        )
+      : DURATION_PRESETS_MINUTES;
+  const dayOptions = knownDurations.has(value.durationMinutes)
+    ? DURATION_DAY_PRESETS_MINUTES
+    : value.durationMinutes >= DURATION_DAY_PRESETS_MINUTES[0]
+      ? [...DURATION_DAY_PRESETS_MINUTES, value.durationMinutes].sort(
+          (a, b) => a - b,
+        )
+      : DURATION_DAY_PRESETS_MINUTES;
 
   function setKind(kind: DueDraft["kind"]) {
     if (kind === "none") {
@@ -181,6 +207,7 @@ export function IslandDuePicker({
         date: null,
         timed: false,
         time: null,
+        durationMinutes: value.durationMinutes,
       });
       setPanelOpen(true);
       return;
@@ -195,6 +222,7 @@ export function IslandDuePicker({
         date: null,
         timed: false,
         time: null,
+        durationMinutes: value.durationMinutes,
       });
       setPanelOpen(true);
       return;
@@ -206,6 +234,7 @@ export function IslandDuePicker({
       date: null,
       timed: false,
       time: null,
+      durationMinutes: value.durationMinutes,
     });
     setPanelOpen(true);
   }
@@ -309,6 +338,7 @@ export function IslandDuePicker({
                   date: null,
                   timed: false,
                   time: null,
+                  durationMinutes: DEFAULT_DURATION_MINUTES,
                 });
               }}
             >
@@ -362,6 +392,7 @@ export function IslandDuePicker({
                       date: null,
                       timed: false,
                       time: null,
+                      durationMinutes: value.durationMinutes,
                     });
                   }}
                 >
@@ -437,6 +468,7 @@ export function IslandDuePicker({
                         time: value.timed
                           ? value.time || "09:00:00"
                           : null,
+                        durationMinutes: value.durationMinutes,
                       });
                     }}
                   >
@@ -460,6 +492,7 @@ export function IslandDuePicker({
                     date: key,
                     timed: value.timed,
                     time: value.timed ? value.time || "09:00:00" : null,
+                    durationMinutes: value.durationMinutes,
                   });
                   setView(
                     new Date(today.getFullYear(), today.getMonth(), 1),
@@ -482,7 +515,13 @@ export function IslandDuePicker({
                     onChange({ ...value, timed: false, time: null });
                   } else {
                     const nextTime = value.time || "09:00:00";
-                    onChange({ ...value, timed: true, time: nextTime });
+                    onChange({
+                      ...value,
+                      timed: true,
+                      time: nextTime,
+                      durationMinutes:
+                        value.durationMinutes || DEFAULT_DURATION_MINUTES,
+                    });
                     setTimeOpen(true);
                   }
                 }}
@@ -564,6 +603,40 @@ export function IslandDuePicker({
                   </div>
                 </div>
               ) : null}
+
+              <div className="flex flex-col gap-2">
+                <div className="text-left text-[11px] font-bold tracking-wider text-[#a09080]">
+                  持续
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {hourOptions.map((minutes) => (
+                    <button
+                      key={minutes}
+                      type="button"
+                      className={modeBtnClass(value.durationMinutes === minutes)}
+                      onClick={() =>
+                        onChange({ ...value, durationMinutes: minutes })
+                      }
+                    >
+                      {formatDurationLabel(minutes)}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {dayOptions.map((minutes) => (
+                    <button
+                      key={minutes}
+                      type="button"
+                      className={modeBtnClass(value.durationMinutes === minutes)}
+                      onClick={() =>
+                        onChange({ ...value, durationMinutes: minutes })
+                      }
+                    >
+                      {formatDurationLabel(minutes)}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           ) : null}
         </>
@@ -576,7 +649,7 @@ export function IslandDuePicker({
             : value.kind === "year" || value.kind === "month"
               ? "待确定：仅精确到年或月，暂不同步日历"
               : value.timed
-                ? "已排期：将同步为 iCloud 定点事件（默认 1 小时）"
+                ? `已排期：将同步为 iCloud 定点事件（${formatDurationLabel(value.durationMinutes)}）`
                 : "已排期：默认全天，将同步为 iCloud 全天事件"}
         </p>
       ) : null}

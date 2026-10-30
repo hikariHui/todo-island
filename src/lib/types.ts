@@ -10,7 +10,7 @@ export type Todo = {
    * 排期时间（见 `getScheduleState`）：
    * - null：未排期
    * - YYYY / YYYY-MM：待确定（不同步日历）
-   * - YYYY-MM-DD / YYYY-MM-DDTHH:mm:ss：已排期（同步日历）
+   * - YYYY-MM-DD / YYYY-MM-DDTHH:mm:ss[/分钟]：已排期（同步日历）
    */
   dueAt: string | null;
   /** CalDAV VEVENT UID */
